@@ -138,5 +138,76 @@ public static double[,] LinkageSingle1D(double[] x)
 }
 
 
+def single_linkage_1d(z_arr):
+    """
+    自定义一维单链接层次聚类，与 scipy.cluster.hierarchy.linkage
+    输入 method='single'、metric='euclidean' 的效果完全一致，输出Z矩阵可直接用于 fcluster
+    仅使用 z 维度的高度信息计算欧氏距离，适配本场景的一维聚类需求
+    """
+    n = len(z_arr)
+    if n <= 1:
+        return np.empty((0, 4))
+
+    # 按z值升序获取原始索引，生成相邻边
+    sorted_indices = np.argsort(z_arr)
+    sorted_z = z_arr[sorted_indices]
+
+    # 构造所有相邻边：(距离, 原始点u索引, 原始点v索引)
+    edges = []
+    for i in range(n - 1):
+        dist = sorted_z[i + 1] - sorted_z[i]
+        u = sorted_indices[i]
+        v = sorted_indices[i + 1]
+        edges.append((dist, u, v))
+
+    # 按距离升序排序，距离相同时按索引升序，与scipy合并逻辑对齐
+    edges.sort(key=lambda x: (x[0], x[1], x[2]))
+
+    # 并查集初始化
+    parent = list(range(n))
+    cluster_size = [1] * n
+    cluster_current_id = list(range(n))  # 每个根簇对应的当前编号
+
+    def find(x):
+        # 路径压缩优化
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    Z = np.zeros((n - 1, 4))
+    merge_step = 0
+
+    for dist, u, v in edges:
+        root_u = find(u)
+        root_v = find(v)
+        if root_u == root_v:
+            continue
+
+        cid_u = cluster_current_id[root_u]
+        cid_v = cluster_current_id[root_v]
+
+        # 保证簇编号小的在前，与scipy输出格式完全一致
+        if cid_u > cid_v:
+            cid_u, cid_v = cid_v, cid_u
+
+        # 填充连接矩阵
+        Z[merge_step, 0] = cid_u
+        Z[merge_step, 1] = cid_v
+        Z[merge_step, 2] = dist
+        Z[merge_step, 3] = cluster_size[root_u] + cluster_size[root_v]
+
+        # 按簇大小合并，更新并查集与簇编号
+        if cluster_size[root_u] < cluster_size[root_v]:
+            root_u, root_v = root_v, root_u
+        parent[root_v] = root_u
+        cluster_size[root_u] += cluster_size[root_v]
+        cluster_current_id[root_u] = n + merge_step
+
+        merge_step += 1
+        if merge_step == n - 1:
+            break
+
+    return Z
 
 }
