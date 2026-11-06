@@ -195,4 +195,60 @@ public static class HierarchicalClustering
         }
         return labels;
     }
+/// <summary>
+/// single linkage + 一维数据的 O(n log n) 版本，等价于通用版结果。
+/// </summary>
+public static double[,] LinkageSingle1D(double[] x)
+{
+    int n = x.Length;
+    if (n < 2) throw new ArgumentException();
+
+    // 排序得到相邻点对
+    int[] idx = new int[n];
+    for (int i = 0; i < n; i++) idx[i] = i;
+    Array.Sort(idx, (i, j) => x[i].CompareTo(x[j]));
+
+    var edges = new (double d, int a, int b)[n - 1];
+    for (int k = 0; k < n - 1; k++)
+    {
+        int i = idx[k], j = idx[k + 1];
+        edges[k] = (Math.Abs(x[i] - x[j]), Math.Min(i, j), Math.Max(i, j));
+    }
+    Array.Sort(edges, (p, q) => p.d.CompareTo(q.d));
+
+    // 并查集：初始每个原始点自成一簇，根为自己
+    int[] parent = new int[2 * n - 1];
+    int[] size = new int[2 * n - 1];
+    for (int i = 0; i < 2 * n - 1; i++) parent[i] = i;
+    for (int i = 0; i < n; i++) size[i] = 1;
+
+    int Find(int a)
+    {
+        while (parent[a] != a) { parent[a] = parent[parent[a]]; a = parent[a]; }
+        return a;
+    }
+
+    var Z = new double[n - 1, 4];
+    int step = 0;
+    foreach (var (d, u, v) in edges)
+    {
+        int ra = Find(u), rb = Find(v);
+        if (ra == rb) continue;                 // 一维 MST 下不会发生，但保留正确性
+
+        int c = n + step;
+        int lo = Math.Min(ra, rb), hi = Math.Max(ra, rb);
+        // 用簇 id 的较小者作为"根"、并把新簇 id 作为新根
+        parent[ra] = c;
+        parent[rb] = c;
+        size[c] = size[ra] + size[rb];
+
+        Z[step, 0] = lo;
+        Z[step, 1] = hi;
+        Z[step, 2] = d;
+        Z[step, 3] = size[c];
+        step++;
+    }
+    return Z;
+}
+
 }
