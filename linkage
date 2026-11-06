@@ -375,4 +375,121 @@ public static double[,] LinkageFast(double[] x, string method = "single")
     return Z;
 }
 
+/// <summary>
+/// 二叉最小堆：存 (int id, double priority)。C# 2.0+ 兼容。
+/// </summary>
+internal sealed class MinHeap
+{
+    private int[] _id;
+    private double[] _pri;
+    private int _count;
+
+    public MinHeap(int capacity)
+    {
+        if (capacity < 4) capacity = 4;
+        _id = new int[capacity];
+        _pri = new double[capacity];
+    }
+
+    public int Count { get { return _count; } }
+
+    public void Clear() { _count = 0; }
+
+    private void EnsureCapacity()
+    {
+        if (_count < _id.Length) return;
+        int nc = _id.Length * 2;
+        int[] ni = new int[nc];
+        double[] np = new double[nc];
+        Array.Copy(_id, ni, _count);
+        Array.Copy(_pri, np, _count);
+        _id = ni;
+        _pri = np;
+    }
+
+    public void Push(int id, double priority)
+    {
+        EnsureCapacity();
+        int i = _count++;
+        _id[i] = id;
+        _pri[i] = priority;
+        while (i > 0)
+        {
+            int p = (i - 1) >> 1;
+            if (_pri[p] <= _pri[i]) break;
+            Swap(i, p);
+            i = p;
+        }
+    }
+
+    public bool Pop(out int id, out double priority)
+    {
+        if (_count == 0) { id = -1; priority = 0.0; return false; }
+        id = _id[0];
+        priority = _pri[0];
+        _count--;
+        if (_count > 0)
+        {
+            _id[0] = _id[_count];
+            _pri[0] = _pri[_count];
+            int i = 0;
+            while (true)
+            {
+                int l = 2 * i + 1;
+                int r = l + 1;
+                int s = i;
+                if (l < _count && _pri[l] < _pri[s]) s = l;
+                if (r < _count && _pri[r] < _pri[s]) s = r;
+                if (s == i) break;
+                Swap(i, s);
+                i = s;
+            }
+        }
+        return true;
+    }
+
+    private void Swap(int a, int b)
+    {
+        int ti = _id[a]; _id[a] = _id[b]; _id[b] = ti;
+        double tp = _pri[a]; _pri[a] = _pri[b]; _pri[b] = tp;
+    }
+}
+
+internal static double Compute(string m, double dki, double dkj, double dij,
+                               int si, int sj, int sk, int skk)
+{
+    switch (m)
+    {
+        case "single":
+            return (dki < dkj) ? dki : dkj;
+        case "complete":
+            return (dki > dkj) ? dki : dkj;
+        case "average":
+            return (si * dki + sj * dkj) / sk;
+        case "weighted":
+            return (dki + dkj) * 0.5;
+        case "centroid":
+            {
+                double v = (si * dki * dki + sj * dkj * dkj) / sk
+                         - ((double)si * sj * dij * dij) / ((double)sk * sk);
+                return Math.Sqrt(v > 0.0 ? v : 0.0);
+            }
+        case "median":
+            {
+                double v = dki * dki * 0.5 + dkj * dkj * 0.5 - dij * dij * 0.25;
+                return Math.Sqrt(v > 0.0 ? v : 0.0);
+            }
+        case "ward":
+            {
+                double num = (skk + si) * dki * dki
+                           + (skk + sj) * dkj * dkj
+                           - skk * dij * dij;
+                double v = num / (skk + sk);
+                return Math.Sqrt(v > 0.0 ? v : 0.0);
+            }
+        default:
+            throw new ArgumentException("不支持的 method: " + m);
+    }
+}
+
 }
