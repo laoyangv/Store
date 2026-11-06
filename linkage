@@ -1,0 +1,198 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+public static class HierarchicalClustering
+{
+    /// <summary>
+    /// 层次聚类。输入一维观测数组，返回 (n-1) x 4 的 linkage 矩阵 Z。
+    /// Z 每行 = [idx1, idx2, distance, sample_count]，idx1 &lt; idx2。
+    /// method: single / complete / average / weighted / centroid / median / ward
+    /// </summary>
+    public static double[,] Linkage(double[] x, string method = "single")
+    {
+        if (x == null) throw new ArgumentNullException(nameof(x));
+        int n = x.Length;
+        if (n < 2) throw new ArgumentException("至少需要 2 个样本");
+
+        string m = method.ToLowerInvariant();
+        var valid = new[] { "single", "complete", "average", "weighted", "centroid", "median", "ward" };
+        if (!valid.Contains(m)) throw new ArgumentException($"不支持的 method: {method}");
+
+        int maxId = 2 * n - 1;
+        double[,] D = new double[maxId, maxId];   // 距离矩阵（对称）
+        int[] size = new int[maxId];
+
+        for (int i = 0; i < n; i++)
+        {
+            size[i] = 1;
+            for (int j = 0; j < n; j++)
+                D[i, j] = Math.Abs(x[i] - x[j]);
+        }
+
+        double[,] Z = new double[n - 1, 4];
+        List<int> active = new List<int>(n);
+        for (int i = 0; i < n; i++) active.Add(i);
+
+        for (int step = 0; step < n - 1; step++)
+        {
+            // ---- 找最小距离对 ----
+            double minD = double.MaxValue;
+            int bestA = -1, bestB = -1;
+            for (int p = 0; p < active.Count; p++)
+            {
+                for (int q = p + 1; q < active.Count; q++)
+                {
+                    int a = active[p], b = active[q];
+                    if (D[a, b] < minD)
+                    {
+                        minD = D[a, b];
+                        bestA = a;
+                        bestB = b;
+                    }
+                }
+            }
+
+            int newId = n + step;
+            size[newId] = size[bestA] + size[bestB];
+
+            // ---- 记录 Z（scipy 规则：小 id 在前）----
+            Z[step, 0] = bestA;
+            Z[step, 1] = bestB;
+            Z[step, 2] = minD;
+            Z[step, 3] = size[newId];
+
+            int si = size[bestA], sj = size[bestB], sk = si + sj;
+            double dij = minD;
+
+            // ---- Lance-Williams 递推更新 ----
+            foreach (int k in active)
+            {
+                if (k == bestA || k == bestB) continue;
+                double dki = D[k, bestA];
+                double dkj = D[k, bestB];
+                double dnew;
+                switch (m)
+                {
+                    case "single":
+                        dnew = Math.Min(dki, dkj);
+                        break;
+                    case "complete":
+                        dnew = Math.Max(dki, dkj);
+                        break;
+                    case "average":
+                        dnew = (si * dki + sj * dkj) / sk;
+                        break;
+                    case "weighted":
+                        dnew = (dki + dkj) / 2.0;
+                        break;
+                    case "centroid":
+                        dnew = Math.Sqrt(Math.Max(
+                            (si * dki * dki + sj * dkj * dkj) / sk
+                            - (double)si * sj * dij * dij / ((double)sk * sk), 0));
+                        break;
+                    case "median":
+                        dnew = Math.Sqrt(Math.Max(
+                            dki * dki / 2.0 + dkj * dkj / 2.0 - dij * dij / 4.0, 0));
+                        break;
+                    case "ward":
+                        {
+                            int skk = size[k];
+                            double num = (skk + si) * dki * dki
+                                       + (skk + sj) * dkj * dkj
+                                       - skk * dij * dij;
+                            double den = skk + sk;
+                            dnew = Math.Sqrt(Math.Max(num / den, 0));
+                            break;
+                        }
+                    default:
+                        throw new ArgumentException();
+                }
+                D[k, newId] = D[newId, k] = dnew;
+            }
+
+            active.Remove(bestA);
+            active.Remove(bestB);
+            active.Add(newId);
+        }
+
+        return Z;
+    }
+
+    /// <summary>
+    /// 切割层次聚类树，返回每个样本的簇标签（1 开始）。
+    /// criterion = "distance"：t 为合并距离阈值（闭区间，dist &lt;= t 的合并都执行）。
+    /// criterion = "maxclust"：t 为最大簇数（向下取整）。
+    /// </summary>
+    public static int[] Fcluster(double[,] Z, double t, string criterion = "distance")
+    {
+        if (Z == null) throw new ArgumentNullException(nameof(Z));
+        int rows = Z.GetLength(0);
+        int n = rows + 1;
+        int maxId = 2 * n - 1;
+
+        int[] parent = new int[maxId];
+        for (int i = 0; i < maxId; i++) parent[i] = i;
+
+        int Find(int a)
+        {
+            while (parent[a] != a) { parent[a] = parent[parent[a]]; a = parent[a]; }
+            return a;
+        }
+        void Union(int a, int b)
+        {
+            int ra = Find(a), rb = Find(b);
+            if (ra != rb) parent[rb] = ra;
+        }
+
+        string c = criterion.ToLowerInvariant();
+        double threshold;
+
+        if (c == "distance")
+        {
+            threshold = t;
+        }
+        else if (c == "maxclust")
+        {
+            int k = (int)Math.Floor(t);
+            if (k <= 1)
+            {
+                threshold = double.PositiveInfinity;   // 全部合并
+            }
+            else if (k >= n)
+            {
+                threshold = double.NegativeInfinity;   // 都不合并
+            }
+            else
+            {
+                int needMerge = n - k;                 // 至少需合并次数
+                var order = Enumerable.Range(0, rows).OrderBy(i => Z[i, 2]).ToArray();
+                threshold = Z[order[needMerge - 1], 2];
+            }
+        }
+        else
+        {
+            throw new ArgumentException($"不支持的 criterion: {criterion}");
+        }
+
+        for (int i = 0; i < rows; i++)
+            if (Z[i, 2] <= threshold)
+                Union((int)Z[i, 0], (int)Z[i, 1]);
+
+        // 按叶节点顺序 0..n-1 重新编号 1..k
+        var map = new Dictionary<int, int>();
+        int[] labels = new int[n];
+        int next = 1;
+        for (int i = 0; i < n; i++)
+        {
+            int r = Find(i);
+            if (!map.TryGetValue(r, out int lab))
+            {
+                lab = next++;
+                map[r] = lab;
+            }
+            labels[i] = lab;
+        }
+        return labels;
+    }
+}
